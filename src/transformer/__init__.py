@@ -1,1 +1,1 @@
-from .Attention import MultiHeadAttention
+from .Transformer import MyTransformer

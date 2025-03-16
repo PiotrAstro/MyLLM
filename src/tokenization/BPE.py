@@ -68,11 +68,14 @@ class BPE_Tokenizer:
         final_text = final_bytes.decode(self.encoding, errors=error)
         return final_text
     
-    def load_and_encode(self, path: pathlib.Path) -> np.ndarray:
+    def load_and_encode(self, path: pathlib.Path, file_text_delimiter: str = "<|endoftext|>") -> np.ndarray:
         """
         Loading and encoding when object was not initialized
         """
-        arrays = [self.encode(text) for text in self._load_texts(path)]
+        arrays = []
+        for text in self._load_texts(path):
+            arrays.append(self.encode(text))
+            arrays.append(self.encode(file_text_delimiter))
         return np.concatenate(arrays)
         
     def encode(self, text: str) -> np.ndarray:
@@ -96,31 +99,29 @@ class BPE_Tokenizer:
         else:
             return False
     
-    def get_normal_tokens_number(self) -> int:
-        return len(self.tokens_mapping)
-    
-    def get_special_tokens_number(self) -> int:
-        return len(self.special_tokens)
+    def get_tokens_number(self) -> int:
+        return len(self.tokens_mapping) + len(self.special_tokens)
 
     def construct(self, path: pathlib.Path, token_normal_number: int):
         words: dict[str, _ConstructWord] = {}  # word str, list of tokens, number of occurances
         for text_part in self._load_texts(path):
-            if text_part not in self.special_tokens:
-                for word in regex.findall(self.split_formula, text_part):
-                    if word in words.keys():
-                        words[word].counter += 1
-                    else:
-                        word_tokens = [b for b in bytearray(word, self.encoding)]
-                        if len(word_tokens) > 1:
-                            pairs = []
-                            for i in range(len(word_tokens) - 1):
-                                pairs.append((word_tokens[i], word_tokens[i + 1]))
-                            words[word] = _ConstructWord(
-                                word=word,
-                                tokens=word_tokens,
-                                pairs=pairs,
-                                counter=1,
-                            )
+            for text_part_splitted in regex.split(self.special_tokens_split, text_part):
+                if text_part_splitted not in self.special_tokens:
+                    for word in regex.findall(self.split_formula, text_part_splitted):
+                        if word in words.keys():
+                            words[word].counter += 1
+                        else:
+                            word_tokens = [b for b in bytearray(word, self.encoding)]
+                            if len(word_tokens) > 1:
+                                pairs = []
+                                for i in range(len(word_tokens) - 1):
+                                    pairs.append((word_tokens[i], word_tokens[i + 1]))
+                                words[word] = _ConstructWord(
+                                    word=word,
+                                    tokens=word_tokens,
+                                    pairs=pairs,
+                                    counter=1,
+                                )
         self._contruct_word_tokens([w for w in words.values()], token_normal_number)
         for special_token in self.special_tokens:
             self.tokens_mapping.append(bytearray(special_token, encoding=self.encoding))
@@ -166,8 +167,7 @@ class BPE_Tokenizer:
         for file in documents_to_read:
             with open(file, "r", encoding=self.encoding) as f:
                 text = f.read()
-            for text_part in regex.split(self.special_tokens_split, text):
-                text_parts.append(text_part)
+            text_parts.append(text)
         return text_parts
 
     def _unicode_to_bytes(self, unicode_word: str) -> bytearray:
