@@ -23,9 +23,10 @@ def process(dataset_iterator, max_size, single_file_size, path, separator):
     documents = []
     current_size = 0
     for i, item in enumerate(dataset_iterator):
-        text_size = sys.getsizeof(item["text"])
+        text = item["text"]
+        text_size = len(text.encode('utf-8'))  # Get actual byte size when encoded to UTF-8
         if current_size + text_size <= max_size:
-            documents.append(item["text"])
+            documents.append(text)
             current_size += text_size
         else:
             break
@@ -41,7 +42,8 @@ def process(dataset_iterator, max_size, single_file_size, path, separator):
     file_texts = []
     current_size = 0
     for doc in documents:
-        current_size += sys.getsizeof(doc)
+        doc_size = len(doc.encode('utf-8'))  # Get actual byte size when encoded to UTF-8
+        current_size += doc_size
         file_texts.append(doc)
         if current_size >= single_file_size:
             safe_file(current_document_num)

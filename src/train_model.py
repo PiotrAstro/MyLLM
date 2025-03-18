@@ -6,8 +6,8 @@ import tokenization
 import transformer
 import json
 
-TOKENIZED_TRAINING_DATA_PATH = pathlib.Path("data", "dataopenwebtext", "tokenized_dataopenwebtext_32768.npy")
-TRAINED_TOKENIZER_PATH = pathlib.Path("results", "tokenizer_dataopenwebtext_32768.txt")
+TOKENIZED_TRAINING_DATA_PATH = pathlib.Path("data", "dataopenwebtext", "tokenized_dataopenwebtext_32767.npy")
+TRAINED_TOKENIZER_PATH = pathlib.Path("results", "tokenizer_dataopenwebtext_32767.txt")
 MODEL_SAVE_PATH = pathlib.Path("results", "model1.dat")
 CONFIG_SAVE_PATH = pathlib.Path("results", "model1.json")
 
@@ -35,6 +35,7 @@ EPOCHS_N = 10
 LOSS_TYPE = torch.nn.CrossEntropyLoss
 
 
+
 def train_routine():
         # save gpt config
     with open(CONFIG_SAVE_PATH, 'w') as f:
@@ -52,12 +53,8 @@ def train_routine():
     sequences = []
     max_start_index = len(loaded_np_tokens) - SEQUENCE_LENGTH - 1
     for start_index in range(0, max_start_index, INPUT_STRIDE):
-        # Get input sequence view
         input_seq = loaded_torch_tokens[start_index:start_index + SEQUENCE_LENGTH]
-        # Get output sequence view (shifted by 1)
         output_seq = loaded_torch_tokens[start_index + 1:start_index + SEQUENCE_LENGTH + 1]
-        
-        # Add tuple of (input, output) to the list
         sequences.append((input_seq, output_seq))
 
     data_loader = torch.utils.data.DataLoader(sequences, batch_size=BATCH_SIZE, shuffle=True)
@@ -76,7 +73,6 @@ def train_routine():
         time_end = time.time()
         gpt.save(MODEL_SAVE_PATH)
         print(f"Calculated {epoch} epoch, time: {time_end - time_start:.2f}")
-
 
 if __name__ == "__main__":
     train_routine()

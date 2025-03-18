@@ -1,6 +1,6 @@
 import pathlib
 import torch
-from .Attention import MultiHeadAttention
+from . import Attention
 
 class Block(torch.nn.Module):
     def __init__(self, 
@@ -9,13 +9,23 @@ class Block(torch.nn.Module):
                  feed_forward_hidden_n: int,
                  attention_dropout: float,
                  residual_dropout: float,
+                 max_sequence_length: int,
+                 attention_head_type: type[torch.nn.Module] = Attention.MultiHeadAttention,
                  feed_forward_activation: torch.nn.Module = torch.nn.GELU(),
     ):
         assert features_n % num_heads == 0
         super(Block, self).__init__()
         # it will normalize features per each token
         self.norm1 = torch.nn.LayerNorm(features_n)
-        self.attention = MultiHeadAttention(features_n, features_n, num_heads, features_n // num_heads, attention_dropout, residual_dropout)
+        self.attention = attention_head_type(
+            features_n,
+            features_n,
+            num_heads,
+            features_n // num_heads,
+            attention_dropout,
+            residual_dropout,
+            max_sequence_length
+        )
         self.norm2 = torch.nn.LayerNorm(features_n)
         self.feed_forward = torch.nn.Sequential(
             torch.nn.Linear(features_n, feed_forward_hidden_n),
@@ -40,15 +50,25 @@ class MyTransformer(torch.nn.Module):
                  residual_dropout: float,
                  attention_dropout: float,
                  embeding_dropout: float,
-                 blocks_n: int
+                 blocks_n: int,
+                 attention_head_type: str = "MultiHeadAttentionFast",
     ):
         super(MyTransformer, self).__init__()
+        match attention_head_type:
+            case "MultiHeadAttention":
+                attention_head_type_ = Attention.MultiHeadAttention
+            case "MultiHeadAttentionFast":
+                attention_head_type_ = Attention.MultiHeadAttentionFast
+            case _:
+                raise ValueError(f"Unknown attention head type: {attention_head_type}")
+
+        self.max_sequence_length = max_sequence_length
         self.word_embeding = torch.nn.Embedding(tokens_number, embeding_size)
         self.positional_encoding = torch.nn.Embedding(max_sequence_length, embeding_size)
         self.embeding_dropout = torch.nn.Dropout(embeding_dropout)
 
         self.blocks = torch.nn.ModuleList([
-            Block(embeding_size, num_heads, feed_forward_hidden_n, attention_dropout, residual_dropout) for _ in range(blocks_n)
+            Block(embeding_size, num_heads, feed_forward_hidden_n, attention_dropout, residual_dropout, max_sequence_length, attention_head_type_) for _ in range(blocks_n)
         ])
 
         self.final_norm = torch.nn.LayerNorm(embeding_size)

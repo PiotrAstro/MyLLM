@@ -113,9 +113,7 @@ class BPE_Tokenizer:
                         else:
                             word_tokens = [b for b in bytearray(word, self.encoding)]
                             if len(word_tokens) > 1:
-                                pairs = []
-                                for i in range(len(word_tokens) - 1):
-                                    pairs.append((word_tokens[i], word_tokens[i + 1]))
+                                pairs = [(word_tokens[i], word_tokens[i + 1]) for i in range(len(word_tokens) - 1)]
                                 words[word] = _ConstructWord(
                                     word=word,
                                     tokens=word_tokens,
@@ -123,8 +121,6 @@ class BPE_Tokenizer:
                                     counter=1,
                                 )
         self._contruct_word_tokens([w for w in words.values()], token_normal_number)
-        for special_token in self.special_tokens:
-            self.tokens_mapping.append(bytearray(special_token, encoding=self.encoding))
 
     def save(self, path: pathlib.Path):
         assert self.tokens_mapping  # check if it initialized or loaded
