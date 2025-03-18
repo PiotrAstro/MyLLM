@@ -39,7 +39,7 @@ class MultiHeadAttentionFast(torch.nn.Module):
         V = V.reshape(-1, sequence_length, self.heads_number, self.output_features_single_head).transpose(1, 2)
 
         attention = torch.matmul(Q, K.transpose(-2, -1))
-        attention /= (self.QK_features_n ** 0.5)
+        attention *= (1.0 / self.QK_features_n ** 0.5)
         attention += self.causal_mask[:sequence_length, :sequence_length]  # type: ignore
         attention = torch.nn.functional.softmax(attention, dim=-1)
         attention = self.attention_dropout(attention)

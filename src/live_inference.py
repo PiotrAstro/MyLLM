@@ -27,14 +27,14 @@ def live_inference(gpt: transformer.MyTransformer, tokenizer: tokenization.BPE_T
     print("\n\nEnter your text or write 'exit' to quit:")
 
     while True:
-        print("\n>>> ", end="")
+        print("\n>>>")
         user_input = input()
         input_tokens = torch.tensor([], dtype=torch.long, requires_grad=False).to(device).view(1, -1)
         if user_input == "exit":
             break
         else:
             # user_input += "<|endoftext|>"
-            print("\nPjoterLLM >>> ", end="")
+            print("\nPjoterLLM >>>")
             user_input_tokens = tokenizer.encode(user_input)
             user_input_tensor = torch.tensor(user_input_tokens, dtype=torch.long, requires_grad=False).to(device).view(1, -1)
             input_tokens = torch.cat((input_tokens, user_input_tensor), dim=1)

@@ -21,6 +21,7 @@ networkx==3.4.2
 numpy==2.2.3
 packaging==24.2
 pandas==2.2.3
+pillow==11.0.0
 propcache==0.3.0
 pyarrow==19.0.1
 python-dateutil==2.9.0.post0
@@ -31,7 +32,9 @@ requests==2.32.3
 setuptools==76.0.0
 six==1.17.0
 sympy==1.13.1
-torch==2.6.0
+torch==2.6.0+cu126
+torchaudio==2.6.0+cu126
+torchvision==0.21.0+cu126
 tqdm==4.67.1
 typing_extensions==4.12.2
 tzdata==2025.1
