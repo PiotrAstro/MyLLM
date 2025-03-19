@@ -4,9 +4,9 @@ import sys
 
 # Limit to certain size
 
-DATASET_NAME = "openwebtext"
-PATH = os.path.join("data", "dataopenwebtext")
-TARGET_TRAIN_SIZE_BYTES = 100 * 1024 * 1024  # 500MB
+DATASET_NAME = {"path": "karpathy/tiny_shakespeare",}
+PATH = os.path.join("data", "shakespear")
+TARGET_TRAIN_SIZE_BYTES = 50 * 1024 * 1024  # 500MB
 TARGET_TEST_SIZE_BYTES = 10 * 1024 * 1024  # 10MB
 SIZE_PER_FILE = 10 * 1024 * 1024  # 10MB
 DOCUMENT_SEPARATOR = "<|endoftext|>"
@@ -55,12 +55,12 @@ def process(dataset_iterator, max_size, single_file_size, path, separator):
 
 
 if __name__ == "__main__":
-    dataset = datasets.load_dataset(DATASET_NAME, streaming=True, trust_remote_code=True)
-    os.mkdir(PATH)
+    dataset = datasets.load_dataset(**DATASET_NAME, streaming=True, trust_remote_code=True)
+    os.makedirs(PATH, exist_ok=True)
     train_path = os.path.join(PATH, "train")
     test_path = os.path.join(PATH, "validation")
-    os.mkdir(train_path)
-    os.mkdir(test_path)
+    os.makedirs(train_path, exist_ok=True)
+    os.makedirs(test_path, exist_ok=True)
 
     iterator = dataset["train"].__iter__()
     process(iterator, TARGET_TRAIN_SIZE_BYTES, SIZE_PER_FILE, train_path, DOCUMENT_SEPARATOR)

@@ -6,10 +6,11 @@ import pathlib
 import tokenization
 import transformer
 import json
+from torch import autocast, GradScaler
 
-TOKENIZED_TRAINING_DATA_PATH = pathlib.Path("data", "dataopenwebtext", "tokenized_dataopenwebtext_32767.npy")
-TRAINED_TOKENIZER_PATH = pathlib.Path("results", "tokenizer_dataopenwebtext_32767.txt")
-MODEL_SAVE_DIR = pathlib.Path("results", "model_32768_tokens")
+TOKENIZED_TRAINING_DATA_PATH = pathlib.Path("data", "tokenized_fineweb_32768.npy")
+TRAINED_TOKENIZER_PATH = pathlib.Path("results", "tokenizer_fineweb_32768.txt")
+MODEL_SAVE_DIR = pathlib.Path("results", "model_fineweb_32768_tokens")
 
 TOKENIZER = tokenization.BPE_Tokenizer()
 TOKENIZER.load(TRAINED_TOKENIZER_PATH)
@@ -22,40 +23,76 @@ GPT_CONFIG = {
     "tokens_number": TOKENIZER.get_tokens_number(),
     "num_heads": 8,
     "blocks_n": 8,
-    "residual_dropout": 0.1,
-    "attention_dropout": 0.1,
-    "embeding_dropout": 0.1
+    "residual_dropout": 0.05,
+    "attention_dropout": 0.05,
+    "embeding_dropout": 0.05
 }
 
-FLOAT_MODE = torch.float32  # torch.float64 or torch.float32 or torch.float16 or torch.bfloat16
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-BATCH_SIZE = 24
-WEIGHT_DECAY = 0.01
-LEARNING_RATE = 1e-4
-SCHEDULER = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+FLOAT_AUTOCAST_MODE = torch.bfloat16  # torch.float64 or torch.float32 or torch.float16 or torch.bfloat16
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+BATCH_SIZE = 64
+VIRTUAL_BATCH_SIZE = 512  # Effective batch size we want to mimic
+ACCUMULATION_STEPS = VIRTUAL_BATCH_SIZE // BATCH_SIZE  # How many batches to accumulate
+WEIGHT_DECAY = 0.005
+LEARNING_RATE = 1e-3
+SCHEDULER = torch.optim.lr_scheduler.OneCycleLR
 SCHEDULER_KWARGS = {
-    "T_0": 5,  # Initial restart period
-    "T_mult": 2,  # Multiply period by this factor after each restart
-    "eta_min": 1e-6  # Minimum learning rate
+    "max_lr": 1e-3,             # Peak learning rate
+    "pct_start": 0.2,            # Percentage of training spent in the increasing phase
+    "div_factor": 100.0,            # initial_lr = max_lr/div_factor
+    "final_div_factor": 10000.0      # final_lr = initial_lr/final_div_factor
 }
 INPUT_STRIDE = SEQUENCE_LENGTH // 2
 EPOCHS_N = 30
-SAVE_MODEL_EACH_N_EPOCHS = 10
+SAVE_MODEL_EACH_N_ACUMMULATED_BATCHES = 5
+LOAD_FROM_EPOCH = None
 
 def get_model_save_path(epoch: int) -> pathlib.Path:
-    return pathlib.Path(MODEL_SAVE_DIR, f"epoch_{epoch:03d}.dat")
+    return pathlib.Path(MODEL_SAVE_DIR, f"epoch_{epoch:03d}.pt")
 
-def train_routine():
+def get_checkpoint_path(epoch: int) -> pathlib.Path:
+    return pathlib.Path(MODEL_SAVE_DIR, f"checkpoint_epoch_{epoch:03d}.pt")
+
+def save_checkpoint(epoch, optimizer, scheduler, path):
+    checkpoint = {
+        'epoch': epoch,
+        'optimizer_state_dict': optimizer.state_dict(),
+        'scheduler_state_dict': scheduler.state_dict(),
+    }
+    torch.save(checkpoint, path)
+    print(f"Full checkpoint saved to {path}")
+
+def load_checkpoint(optimizer, scheduler, path):
+    checkpoint = torch.load(path)
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+    epoch = checkpoint['epoch']
+    print(f"Checkpoint loaded from {path}, resuming from epoch {epoch+1}")
+    return epoch + 1
+
+def train_routine(resume_from_checkpoint: int | None = None):
+    # create save directory if it doesn't exist
+    MODEL_SAVE_DIR.mkdir(parents=True, exist_ok=True)
+    
     # save gpt config
     with open(pathlib.Path(MODEL_SAVE_DIR, "config.json"), 'w') as f:
         json.dump(GPT_CONFIG, f)
 
     log_header = "epoch, time, learning_rate, avg_perplexity"
-    with open(pathlib.Path(MODEL_SAVE_DIR, "log.log"), 'w') as f:
-        f.write(log_header + "\n")
+    
+    # Initialize or append to log file based on whether we're resuming
+    log_mode = 'a' if resume_from_checkpoint is not None else 'w'
+    with open(pathlib.Path(MODEL_SAVE_DIR, "log.log"), log_mode) as f:
+        if log_mode == 'w':
+            f.write(log_header + "\n")
 
-    gpt = transformer.MyTransformer(**GPT_CONFIG).to(FLOAT_MODE).to(DEVICE)
-    gpt.save(get_model_save_path(0))
+    gpt = transformer.MyTransformer(**GPT_CONFIG).to(DEVICE)  # we do not move it to desired float precision - we will do it with autocast
+    print("Compiling model")
+    gpt: transformer.MyTransformer = torch.compile(gpt)  # type: ignore
+    
+    # If we're not resuming, save the initial model
+    if resume_from_checkpoint is None:
+        gpt.save(get_model_save_path(0))
 
     print(f"CUDA available: {torch.cuda.is_available()}")
     print(f"CUDA device count: {torch.cuda.device_count()}")
@@ -76,49 +113,84 @@ def train_routine():
         sequences.append((input_seq, output_seq))
 
     data_loader = torch.utils.data.DataLoader(sequences, batch_size=BATCH_SIZE, shuffle=True)  # type: ignore
-    optimizer = torch.optim.AdamW(gpt.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-    scheduler = SCHEDULER(
-        optimizer,
-        **SCHEDULER_KWARGS
-    )
     
+    total_steps = (len(data_loader) // ACCUMULATION_STEPS) * EPOCHS_N
+    print(f"Total training steps with gradient accumulation: {total_steps}")
+
+    scheduler_kwargs = SCHEDULER_KWARGS.copy()
+    scheduler_kwargs["total_steps"] = total_steps
+    optimizer = torch.optim.AdamW(gpt.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    scheduler = SCHEDULER(optimizer, **scheduler_kwargs)
+    
+    # Load optimizer and scheduler state if resuming
+    start_epoch = 0
+    if resume_from_checkpoint is not None:
+        # Load model weights
+        gpt.load(get_model_save_path(resume_from_checkpoint))
+        # Load optimizer and scheduler state
+        start_epoch = load_checkpoint(optimizer, scheduler, get_checkpoint_path(resume_from_checkpoint))
+    
+    print(f"Training with effective batch size: {VIRTUAL_BATCH_SIZE} (actual: {BATCH_SIZE}, accumulation: {ACCUMULATION_STEPS})")
+    print(f"Starting from epoch {start_epoch}")
     print("Start training")
 
     loss = torch.nn.CrossEntropyLoss()
-    for epoch in range(EPOCHS_N):
+    scaler = GradScaler()  # Updated to use the correct GradScaler
+    for epoch in range(start_epoch, EPOCHS_N):
         time_start = time.time()
         perplexity_sum = 0
-        batches_performed = 0
-        for (input_batch, output_batch) in data_loader:
-            optimizer.zero_grad()
+        perplexity_sum_accum = 0
+        batch_accum_start_time = time.time()
+        
+        for batch_idx, (input_batch, output_batch) in enumerate(data_loader):
+            # Using autocast for mixed precision
+            with autocast(device_type=DEVICE, dtype=FLOAT_AUTOCAST_MODE):
+                # Forward pass
+                predicted = gpt(input_batch)
+                predicted_for_loss = predicted.view(-1, predicted.size(-1))
+                output_batch_for_loss = output_batch.view(-1)
 
-            predicted = gpt(input_batch)
-            predicted_for_loss = predicted.view(-1, predicted.size(-1))
-            output_batch_for_loss = output_batch.view(-1)
+                # Calculate loss and scale by accumulation steps
+                loss_here = loss(predicted_for_loss, output_batch_for_loss) / ACCUMULATION_STEPS
+                
+                # For logging, we need to unscale the loss to get the true perplexity
+                perplexity_here = math.exp(loss_here.item() * ACCUMULATION_STEPS)
+                perplexity_sum += perplexity_here
+                perplexity_sum_accum += perplexity_here
 
-            loss_here = loss(predicted_for_loss, output_batch_for_loss)
-            perplexity_here = math.exp(loss_here.item())
-            perplexity_sum += perplexity_here
-            batches_performed += 1
+            # Backward pass
+            scaler.scale(loss_here).backward()
+            
+            # Only update weights after accumulating gradients
+            if (batch_idx + 1) % ACCUMULATION_STEPS == 0 or batch_idx == len(data_loader) - 1:
+                # Clip gradients and update
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(gpt.parameters(), max_norm=1.0)
+                scaler.step(optimizer)
+                scaler.update()
+                scheduler.step()
+                optimizer.zero_grad()
+                
+                perplexity_avg_accum = perplexity_sum_accum / ACCUMULATION_STEPS
+                perplexity_sum_accum = 0
+                batch_accum_time_spend = time.time() - batch_accum_start_time
+                accum_batch = (batch_idx // ACCUMULATION_STEPS) + 1
+                print(f"Epoch {epoch}, Accumulated Batch {accum_batch}/{len(data_loader)//ACCUMULATION_STEPS}: {perplexity_avg_accum:.2f}, LR: {scheduler.get_last_lr()[0]:.8f}, Time: {batch_accum_time_spend:.2f}s", flush=True)
+                if accum_batch % SAVE_MODEL_EACH_N_ACUMMULATED_BATCHES == 0:
+                    gpt.save(get_model_save_path(epoch))
+                    save_checkpoint(epoch, optimizer, scheduler, get_checkpoint_path(epoch))
+                batch_accum_start_time = time.time()
 
-            loss_here.backward()
-            optimizer.step()
-
-            print("\033[s", end="", flush=True)  # Save cursor position
-            print(f"{perplexity_here:.2f}\033[K", end="", flush=True)  # Print and clear rest of line
-            print("\033[u", end="", flush=True)  # Restore cursor position
-
-            if epoch % SAVE_MODEL_EACH_N_EPOCHS == 0:
-                gpt.save(get_model_save_path(epoch))
-
-        avg_perplexity = perplexity_sum / batches_performed
-        scheduler.step()
+        avg_perplexity = (perplexity_sum if perplexity_sum < 1e20 else 1e20) / len(data_loader)
         time_end = time.time()
+        
         gpt.save(get_model_save_path(epoch))
-        log_text = f"{epoch}, {time_end - time_start:.2f}, {scheduler.get_last_lr()[0]:.6f}, {avg_perplexity:.4f}"
+        save_checkpoint(epoch, optimizer, scheduler, get_checkpoint_path(epoch))
+        
+        log_text = f"{epoch}, {time_end - time_start:.2f}, {scheduler.get_last_lr()[0]:.8f}, {avg_perplexity:.4f}"
         with open(pathlib.Path(MODEL_SAVE_DIR, "log.log"), 'a') as f:
             f.write(log_text + "\n")
         print(log_header + "\n" + log_text + "\n\n\n")
 
 if __name__ == "__main__":
-    train_routine()
+    train_routine(LOAD_FROM_EPOCH)
