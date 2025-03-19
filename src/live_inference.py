@@ -7,8 +7,8 @@ import transformer
 import json
 
 TRAINED_TOKENIZER_PATH = pathlib.Path("results", "tokenizer_dataopenwebtext_32767.txt")
-MODEL_SAVE_PATH = pathlib.Path("results", "model1.dat")
-CONFIG_SAVE_PATH = pathlib.Path("results", "model1.json")
+MODEL_SAVE_PATH = pathlib.Path("results", "model_32768_tokens", "epoch_000.dat")
+CONFIG_SAVE_PATH = pathlib.Path("results", "model_32768_tokens", "config.json")
 
 with open(CONFIG_SAVE_PATH, 'r') as f:
     GPT_CONFIG = json.load(f)

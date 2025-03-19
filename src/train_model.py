@@ -9,8 +9,7 @@ import json
 
 TOKENIZED_TRAINING_DATA_PATH = pathlib.Path("data", "dataopenwebtext", "tokenized_dataopenwebtext_32767.npy")
 TRAINED_TOKENIZER_PATH = pathlib.Path("results", "tokenizer_dataopenwebtext_32767.txt")
-MODEL_SAVE_PATH = pathlib.Path("results", "model1.dat")
-CONFIG_SAVE_PATH = pathlib.Path("results", "model1.json")
+MODEL_SAVE_DIR = pathlib.Path("results", "model_32768_tokens")
 
 TOKENIZER = tokenization.BPE_Tokenizer()
 TOKENIZER.load(TRAINED_TOKENIZER_PATH)
@@ -28,8 +27,9 @@ GPT_CONFIG = {
     "embeding_dropout": 0.1
 }
 
-FLOAT_MODE = torch.float16  # torch.float64 or torch.float32 or torch.float16 or torch.bfloat16
-BATCH_SIZE = 12
+FLOAT_MODE = torch.float32  # torch.float64 or torch.float32 or torch.float16 or torch.bfloat16
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+BATCH_SIZE = 24
 WEIGHT_DECAY = 0.01
 LEARNING_RATE = 1e-4
 SCHEDULER = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
@@ -40,22 +40,33 @@ SCHEDULER_KWARGS = {
 }
 INPUT_STRIDE = SEQUENCE_LENGTH // 2
 EPOCHS_N = 30
+SAVE_MODEL_EACH_N_EPOCHS = 10
 
-
+def get_model_save_path(epoch: int) -> pathlib.Path:
+    return pathlib.Path(MODEL_SAVE_DIR, f"epoch_{epoch:03d}.dat")
 
 def train_routine():
     # save gpt config
-    with open(CONFIG_SAVE_PATH, 'w') as f:
+    with open(pathlib.Path(MODEL_SAVE_DIR, "config.json"), 'w') as f:
         json.dump(GPT_CONFIG, f)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    gpt = transformer.MyTransformer(**GPT_CONFIG).to(FLOAT_MODE).to(device)
-    gpt.save(MODEL_SAVE_PATH)
+    log_header = "epoch, time, learning_rate, avg_perplexity"
+    with open(pathlib.Path(MODEL_SAVE_DIR, "log.log"), 'w') as f:
+        f.write(log_header + "\n")
 
+    gpt = transformer.MyTransformer(**GPT_CONFIG).to(FLOAT_MODE).to(DEVICE)
+    gpt.save(get_model_save_path(0))
+
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    print(f"CUDA device count: {torch.cuda.device_count()}")
+    if torch.cuda.is_available():
+        print(f"CUDA device name: {torch.cuda.get_device_name(0)}")
+    print(f"Using {DEVICE} device")
     print(f"Model has {gpt.parameters_number():_} parameters")
+    print("Preparing batches")
 
     loaded_np_tokens = np.load(TOKENIZED_TRAINING_DATA_PATH, allow_pickle=False)
-    loaded_torch_tokens = torch.tensor(loaded_np_tokens, dtype=torch.long, requires_grad=False).to(device)
+    loaded_torch_tokens = torch.tensor(loaded_np_tokens, dtype=torch.long, requires_grad=False).to(DEVICE)
 
     sequences = []
     max_start_index = len(loaded_np_tokens) - SEQUENCE_LENGTH - 1
@@ -71,6 +82,7 @@ def train_routine():
         **SCHEDULER_KWARGS
     )
     
+    print("Start training")
 
     loss = torch.nn.CrossEntropyLoss()
     for epoch in range(EPOCHS_N):
@@ -85,17 +97,28 @@ def train_routine():
             output_batch_for_loss = output_batch.view(-1)
 
             loss_here = loss(predicted_for_loss, output_batch_for_loss)
-            perplexity_sum += math.exp(loss_here.item())
+            perplexity_here = math.exp(loss_here.item())
+            perplexity_sum += perplexity_here
             batches_performed += 1
 
             loss_here.backward()
             optimizer.step()
 
+            print("\033[s", end="", flush=True)  # Save cursor position
+            print(f"{perplexity_here:.2f}\033[K", end="", flush=True)  # Print and clear rest of line
+            print("\033[u", end="", flush=True)  # Restore cursor position
+
+            if epoch % SAVE_MODEL_EACH_N_EPOCHS == 0:
+                gpt.save(get_model_save_path(epoch))
+
         avg_perplexity = perplexity_sum / batches_performed
         scheduler.step()
         time_end = time.time()
-        gpt.save(MODEL_SAVE_PATH)
-        print(f"Calculated {epoch} epoch, time: {time_end - time_start:.2f}, learning_rate: {scheduler.get_last_lr()[0]:.6f}, perplexity: {avg_perplexity:.4f}")
+        gpt.save(get_model_save_path(epoch))
+        log_text = f"{epoch}, {time_end - time_start:.2f}, {scheduler.get_last_lr()[0]:.6f}, {avg_perplexity:.4f}"
+        with open(pathlib.Path(MODEL_SAVE_DIR, "log.log"), 'a') as f:
+            f.write(log_text + "\n")
+        print(log_header + "\n" + log_text + "\n\n\n")
 
 if __name__ == "__main__":
     train_routine()
