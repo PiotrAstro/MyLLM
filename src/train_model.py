@@ -39,11 +39,11 @@ SCHEDULER = torch.optim.lr_scheduler.OneCycleLR
 SCHEDULER_KWARGS = {
     "max_lr": 1e-3,             # Peak learning rate
     "pct_start": 0.2,            # Percentage of training spent in the increasing phase
-    "div_factor": 100.0,            # initial_lr = max_lr/div_factor
-    "final_div_factor": 10000.0      # final_lr = initial_lr/final_div_factor
+    "div_factor": 25.0,            # initial_lr = max_lr/div_factor
+    "final_div_factor": 100.0      # final_lr = initial_lr/final_div_factor
 }
 INPUT_STRIDE = SEQUENCE_LENGTH // 2
-EPOCHS_N = 30
+EPOCHS_N = 50
 SAVE_MODEL_EACH_N_ACUMMULATED_BATCHES = 5
 LOAD_FROM_EPOCH = None
 

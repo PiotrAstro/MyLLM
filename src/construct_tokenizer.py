@@ -3,7 +3,7 @@ import tokenization
 
 TOKENS_N = 32_768
 
-DATA_PATH = pathlib.Path("data", "fineweb", "train")
+DATA_PATH = pathlib.Path("data", "fineweb", "train", "000.txt")
 SAFE_PATH = pathlib.Path("results", f"tokenizer_fineweb_{TOKENS_N}.txt")
 
 if __name__ == "__main__":

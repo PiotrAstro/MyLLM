@@ -223,6 +223,7 @@ class BPE_Tokenizer:
                 pairs_word_backbond[pair] = word_set
 
         while len(tokens_mapping) < desired_tokens_n:
+            self._print_progress(len(tokens_mapping), desired_tokens_n)
             max_pair, _ = max(pairs_counter.items(), key=lambda x: x[1])
             new_token_value = len(tokens_mapping)
             tokens_merge_ranking[max_pair] = new_token_value
@@ -249,6 +250,13 @@ class BPE_Tokenizer:
             del pairs_word_backbond[max_pair]
         self.tokens_mapping = tokens_mapping
         self.tokens_merge_ranking = tokens_merge_ranking
+
+    def _print_progress(self, len_tokens_mapping: int, desired_tokens_n: int):
+        # save cursor
+        print("\033[s", end="", flush=True)
+        print(f"Constructing tokens: {len_tokens_mapping} / {desired_tokens_n}", end="", flush=True)
+        # restore cursor
+        print("\033[u", end="", flush=True)
 
     @staticmethod
     def bytes_to_unicode() -> list[str]:

@@ -33,7 +33,7 @@ def live_inference(gpt: transformer.MyTransformer, tokenizer: tokenization.BPE_T
         if user_input == "exit":
             break
         else:
-            # user_input += "<|endoftext|>"
+            user_input += "<|endoftext|>"
             print("\nPjoterLLM >>>")
             user_input_tokens = tokenizer.encode(user_input)
             user_input_tensor = torch.tensor(user_input_tokens, dtype=torch.long, requires_grad=False).to(device).view(1, -1)
