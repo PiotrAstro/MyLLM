@@ -3,6 +3,7 @@ import torch
 from . import Attention
 
 class Block(torch.nn.Module):
+
     def __init__(self, 
                  features_n: int,
                  num_heads: int,
@@ -41,6 +42,7 @@ class Block(torch.nn.Module):
         return x
 
 class MyTransformer(torch.nn.Module):
+    device: torch.device | str = torch.device("cpu")
     def __init__(self, 
                  max_sequence_length: int,
                  embeding_size: int,
@@ -95,6 +97,20 @@ class MyTransformer(torch.nn.Module):
 
     def save(self, path: str | pathlib.Path):
         torch.save(self.state_dict(), path)
-    
+
+    def to(self, *args, **kwargs):
+        # Store device if provided
+        if args and isinstance(args[0], (torch.device, str)):
+            device = args[0]
+        elif 'device' in kwargs:
+            device = kwargs['device']
+            if isinstance(device, str):
+                self.device = torch.device(device)
+            else:
+                self.device = device
+                
+        # Call parent implementation
+        return super().to(*args, **kwargs)
+
     def load(self, path: str | pathlib.Path):
-        self.load_state_dict(torch.load(path))
+        self.load_state_dict(torch.load(path, map_location=self.device))

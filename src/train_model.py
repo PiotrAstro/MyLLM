@@ -8,7 +8,10 @@ import transformer
 import json
 from torch import autocast, GradScaler
 
+
+
 TOKENIZED_TRAINING_DATA_PATH = pathlib.Path("data", "tokenized_fineweb_32768.npy")
+TOKENIZED_VALIDATION_DATA_PATH = pathlib.Path("data", "tokenized_fineweb_32768_validation.npy")
 TRAINED_TOKENIZER_PATH = pathlib.Path("results", "tokenizer_fineweb_32768.txt")
 MODEL_SAVE_DIR = pathlib.Path("results", "model_fineweb_32768_tokens")
 
@@ -38,14 +41,28 @@ LEARNING_RATE = 1e-3
 SCHEDULER = torch.optim.lr_scheduler.OneCycleLR
 SCHEDULER_KWARGS = {
     "max_lr": 1e-3,             # Peak learning rate
-    "pct_start": 0.2,            # Percentage of training spent in the increasing phase
+    "pct_start": 0.1,            # Percentage of training spent in the increasing phase
     "div_factor": 25.0,            # initial_lr = max_lr/div_factor
     "final_div_factor": 100.0      # final_lr = initial_lr/final_div_factor
 }
 INPUT_STRIDE = SEQUENCE_LENGTH // 2
-EPOCHS_N = 50
-SAVE_MODEL_EACH_N_ACUMMULATED_BATCHES = 5
+EPOCHS_N = 30
+SAVE_MODEL_EACH_N_ACUMMULATED_BATCHES = 20
 LOAD_FROM_EPOCH = None
+
+def get_data_loader_from_file(file_path: pathlib.Path) -> torch.utils.data.DataLoader:
+    loaded_np_tokens = np.load(file_path, allow_pickle=False)
+    loaded_torch_tokens = torch.tensor(loaded_np_tokens, dtype=torch.long, requires_grad=False).to(DEVICE)
+
+    sequences = []
+    max_start_index = len(loaded_np_tokens) - SEQUENCE_LENGTH - 1
+    for start_index in range(0, max_start_index, INPUT_STRIDE):
+        input_seq = loaded_torch_tokens[start_index:start_index + SEQUENCE_LENGTH]
+        output_seq = loaded_torch_tokens[start_index + 1:start_index + SEQUENCE_LENGTH + 1]
+        sequences.append((input_seq, output_seq))
+
+    data_loader = torch.utils.data.DataLoader(sequences, batch_size=BATCH_SIZE, shuffle=True)  # type: ignore
+    return data_loader
 
 def get_model_save_path(epoch: int) -> pathlib.Path:
     return pathlib.Path(MODEL_SAVE_DIR, f"epoch_{epoch:03d}.pt")
@@ -78,7 +95,7 @@ def train_routine(resume_from_checkpoint: int | None = None):
     with open(pathlib.Path(MODEL_SAVE_DIR, "config.json"), 'w') as f:
         json.dump(GPT_CONFIG, f)
 
-    log_header = "epoch, time, learning_rate, avg_perplexity"
+    log_header = "epoch, time, learning_rate, avg_perplexity, avg_perplexity_validation"
     
     # Initialize or append to log file based on whether we're resuming
     log_mode = 'a' if resume_from_checkpoint is not None else 'w'
@@ -102,23 +119,14 @@ def train_routine(resume_from_checkpoint: int | None = None):
     print(f"Model has {gpt.parameters_number():_} parameters")
     print("Preparing batches")
 
-    loaded_np_tokens = np.load(TOKENIZED_TRAINING_DATA_PATH, allow_pickle=False)
-    loaded_torch_tokens = torch.tensor(loaded_np_tokens, dtype=torch.long, requires_grad=False).to(DEVICE)
-
-    sequences = []
-    max_start_index = len(loaded_np_tokens) - SEQUENCE_LENGTH - 1
-    for start_index in range(0, max_start_index, INPUT_STRIDE):
-        input_seq = loaded_torch_tokens[start_index:start_index + SEQUENCE_LENGTH]
-        output_seq = loaded_torch_tokens[start_index + 1:start_index + SEQUENCE_LENGTH + 1]
-        sequences.append((input_seq, output_seq))
-
-    data_loader = torch.utils.data.DataLoader(sequences, batch_size=BATCH_SIZE, shuffle=True)  # type: ignore
+    data_loader = get_data_loader_from_file(TOKENIZED_TRAINING_DATA_PATH)
+    validation_data_loader = get_data_loader_from_file(TOKENIZED_VALIDATION_DATA_PATH)
     
     total_steps = (len(data_loader) // ACCUMULATION_STEPS) * EPOCHS_N
     print(f"Total training steps with gradient accumulation: {total_steps}")
 
     scheduler_kwargs = SCHEDULER_KWARGS.copy()
-    scheduler_kwargs["total_steps"] = total_steps
+    scheduler_kwargs["total_steps"] = total_steps + 1
     optimizer = torch.optim.AdamW(gpt.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
     scheduler = SCHEDULER(optimizer, **scheduler_kwargs)
     
@@ -152,8 +160,6 @@ def train_routine(resume_from_checkpoint: int | None = None):
 
                 # Calculate loss and scale by accumulation steps
                 loss_here = loss(predicted_for_loss, output_batch_for_loss) / ACCUMULATION_STEPS
-                
-                # For logging, we need to unscale the loss to get the true perplexity
                 perplexity_here = math.exp(loss_here.item() * ACCUMULATION_STEPS)
                 perplexity_sum += perplexity_here
                 perplexity_sum_accum += perplexity_here
@@ -181,13 +187,25 @@ def train_routine(resume_from_checkpoint: int | None = None):
                     save_checkpoint(epoch, optimizer, scheduler, get_checkpoint_path(epoch))
                 batch_accum_start_time = time.time()
 
+        perplexity_sum_validation = 0
+        with torch.no_grad():
+            for input_batch, output_batch in validation_data_loader:
+                with autocast(device_type=DEVICE, dtype=FLOAT_AUTOCAST_MODE):
+                    predicted = gpt(input_batch)
+                    predicted_for_loss = predicted.view(-1, predicted.size(-1))
+                    output_batch_for_loss = output_batch.view(-1)
+                    loss_here = loss(predicted_for_loss, output_batch_for_loss)
+                    perplexity_here = math.exp(loss_here.item())
+                    perplexity_sum_validation += perplexity_here
+
         avg_perplexity = (perplexity_sum if perplexity_sum < 1e20 else 1e20) / len(data_loader)
+        avg_perplexity_validation = (perplexity_sum_validation if perplexity_sum_validation < 1e20 else 1e20) / len(validation_data_loader)
         time_end = time.time()
         
         gpt.save(get_model_save_path(epoch))
         save_checkpoint(epoch, optimizer, scheduler, get_checkpoint_path(epoch))
         
-        log_text = f"{epoch}, {time_end - time_start:.2f}, {scheduler.get_last_lr()[0]:.8f}, {avg_perplexity:.4f}"
+        log_text = f"{epoch}, {time_end - time_start:.2f}, {scheduler.get_last_lr()[0]:.8f}, {avg_perplexity:.4f}, {avg_perplexity_validation:.4f}"
         with open(pathlib.Path(MODEL_SAVE_DIR, "log.log"), 'a') as f:
             f.write(log_text + "\n")
         print(log_header + "\n" + log_text + "\n\n\n")

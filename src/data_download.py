@@ -4,10 +4,10 @@ import sys
 
 # Limit to certain size
 
-DATASET_NAME = {"path": "karpathy/tiny_shakespeare",}
-PATH = os.path.join("data", "shakespear")
-TARGET_TRAIN_SIZE_BYTES = 50 * 1024 * 1024  # 500MB
-TARGET_TEST_SIZE_BYTES = 10 * 1024 * 1024  # 10MB
+DATASET_NAME = {"path": "HuggingFaceFW/fineweb", "name": "sample-100BT"}
+PATH = os.path.join("data", "fineweb")
+TARGET_TRAIN_SIZE_BYTES = 500 * 1024 * 1024  # 500MB
+TARGET_TEST_SIZE_BYTES = 30 * 1024 * 1024  # 30MB
 SIZE_PER_FILE = 10 * 1024 * 1024  # 10MB
 DOCUMENT_SEPARATOR = "<|endoftext|>"
 
