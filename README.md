@@ -128,12 +128,16 @@ ONE_PROMPT_MAX_OUTPUT_TOKENS = 512  # Maximum tokens to generate per prompt
 STREAMING = True  # Whether to stream tokens as they're generated
 ```
 
-Example session:
+Example session (it was trained on fineweb with on lot of stories, so it works best at continuing them):
 ```
 Enter your text or write 'exit' to quit:
->>> The meaning of life is
+>>>  In the small town of Millfield, where the fog rolled in every evening like clockwork, Sarah discovered an antique pocket watch buried beneath the floorboards of her newly inherited house. The watch was unlike anything she had seen before—its face adorned with strange symbols instead of numbers, and its hands moving counterclockwise at an uneven pace.
 
-PioterLLM >>> The meaning of life is to find your gift. The purpose of life is to give it away. In the end, it's not the years in your life that count. It's the life in your years. Life is really simple, but we insist on making it complicated...
+
+PioterLLM >>>  In the late evening, the watch was filled with the secret fire that was set off by a few other people from local schools.
+‘You don’t have to play with me,’ said Sarah.
+‘You don’t have to do anything. You can’t fight in a frenzy,” said Sarah.
+‘This is a great way to think about what you were up to and what you should do to get out of the city.’
 ```
 
 ## Workflow

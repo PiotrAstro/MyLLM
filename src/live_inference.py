@@ -52,7 +52,7 @@ def live_inference(gpt: transformer.MyTransformer, tokenizer: tokenization.BPE_T
         if user_input == "exit":
             break
         else:
-            user_input += ""  # "<|endoftext|>"
+            user_input += "\n"  # "<|endoftext|>" - I do not use it cause it was trained with eof between documents, so it will start saying random things after eof
             print("\nPioterLLM >>>  ", end="", flush=True)
             user_input_tokens = tokenizer.encode(user_input)
             user_input_tensor = torch.tensor(user_input_tokens, dtype=torch.long, requires_grad=False).to(device).view(1, -1)
