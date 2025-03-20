@@ -63,7 +63,7 @@ def live_inference(gpt: transformer.MyTransformer, tokenizer: tokenization.BPE_T
             with torch.no_grad():
                 while True:
                     if this_prompt_output_count >= one_prompt_max_output_tokens:
-                        this_prompt_output_tokens.append(tokenizer.encode("<|endoftext|>")[0])
+                        this_prompt_output_tokens.append(tokenizer.encode("\n")[0])
                         break
                     this_prompt_output_count += 1
 
